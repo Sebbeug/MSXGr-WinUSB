@@ -8,6 +8,14 @@ initiale du pilote.
 Le nom du fichier reste obligatoirement `MSXGr.dll`, car les émulateurs
 recherchent cette ABI historique.
 
+## Télécharger
+
+- [Archive x64 avec documentation](https://github.com/Sebbeug/MSXGr-WinUSB/releases/download/v1.0.0.7/MSXGr-WinUSB-v1.0.0.7-x64.zip)
+- [DLL x64 seule](https://github.com/Sebbeug/MSXGr-WinUSB/releases/download/v1.0.0.7/MSXGr.dll)
+- [Page de la version v1.0.0.7](https://github.com/Sebbeug/MSXGr-WinUSB/releases/tag/v1.0.0.7)
+
+Vérifiez le SHA-256 indiqué plus bas avant l'installation.
+
 ## À quoi sert la version x64 ?
 
 La DLL x64 est destinée à **blueMSX+ compilé en 64 bits** et aux autres
@@ -78,7 +86,7 @@ Le test matériel fourni est réservé à une cartouche Gradius/Nemesis original
 de 128 Kio. Fermez l'émulateur avant de l'exécuter :
 
 ```powershell
-.\test-gradius.ps1
+powershell -NoProfile -ExecutionPolicy Bypass -File .\test-gradius.ps1
 ```
 
 Il vérifie le dump de 128 Kio avec le CRC32 de référence `4dfcc009`. Une DLL
