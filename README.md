@@ -37,8 +37,8 @@ dossier que l'exécutable de l'émulateur**. Il ne faut pas copier la DLL dans
 |---|---:|---|---|
 | The Goonies | 32 Kio | Konami | OK |
 | Gradius / Nemesis | 128 Kio | Konami | OK, fluide |
-| Nemesis 2 | — | Konami SCC | OK, SCC fluide |
-| Space Manbow | — | Konami SCC | OK, SCC fluide avec blueMSX+ modifié |
+| Nemesis 2 | — | Konami SCC | OK, SCC avec blueMSX+ modifié |
+| Space Manbow | — | Konami SCC | OK, SCC avec blueMSX+ modifié |
 | R-Type | — | R-Type | OK |
 | Rastan Saga | 256 Kio | ASCII8 | OK |
 | Break In (1987) | 64 Kio | Mirrored | OK |
