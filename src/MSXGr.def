@@ -1,0 +1,13 @@
+LIBRARY MSXGr
+EXPORTS
+    MSXGR_Init
+    MSXGR_Uninit
+    MSXGR_Err2Str
+    MSXGR_GetVersion
+    MSXGR_SetDebugMode
+    MSXGR_IsSlotEnable
+    MSXGR_GetSlotStatus
+    MSXGR_ReadMemory
+    MSXGR_WriteMemory
+    MSXGR_ReadIO
+    MSXGR_WriteIO

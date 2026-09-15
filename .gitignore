@@ -1,0 +1,7 @@
+/build/
+/release/
+/blueMSX-portable/
+/blueMSX-plus-portable/
+*.log
+*.rom
+*.bin
