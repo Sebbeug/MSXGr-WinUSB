@@ -1,5 +1,7 @@
 # MSXGr-WinUSB
 
+![MSXGr.dll — MSX Game Reader compatible Windows 10/11 x64](assets/MSXGr.dll.png)
+
 Remplacement libre de `MSXGr.dll` pour le lecteur **ASCII/Sunrise MSX Game
 Reader** sous Windows 10/11. La bibliothèque communique directement avec le
 pilote Microsoft WinUSB, sans libusb, Python ni Zadig après l'installation
@@ -18,7 +20,8 @@ Vérifiez le SHA-256 indiqué plus bas avant l'installation.
 
 ## À quoi sert la version x64 ?
 
-La DLL x64 est destinée à **blueMSX+ compilé en 64 bits** et aux autres
+La DLL x64 est destinée à **[blueMSX+](https://github.com/Hesoten/blueMSX-plus)
+compilé en 64 bits** et aux autres
 programmes x64 compatibles avec l'API MSXGr. Elle ne peut pas être chargée par
 le MSXPLAYer historique ni par le blueMSX historique lorsqu'ils sont en
 32 bits. Pour ceux-ci, conservez la DLL officielle x86 si elle fonctionne, ou
@@ -37,8 +40,8 @@ dossier que l'exécutable de l'émulateur**. Il ne faut pas copier la DLL dans
 |---|---:|---|---|
 | The Goonies | 32 Kio | Konami | OK |
 | Gradius / Nemesis | 128 Kio | Konami | OK, fluide |
-| Nemesis 2 | — | Konami SCC | OK, SCC avec blueMSX+ modifié |
-| Space Manbow | — | Konami SCC | OK, SCC avec blueMSX+ modifié |
+| Nemesis 2 | — | Konami SCC | OK, SCC avec [blueMSX+](https://github.com/Hesoten/blueMSX-plus) modifié |
+| Space Manbow | — | Konami SCC | OK, SCC avec [blueMSX+](https://github.com/Hesoten/blueMSX-plus) modifié |
 | R-Type | — | R-Type | OK |
 | Rastan Saga | 256 Kio | ASCII8 | OK |
 | Break In (1987) | 64 Kio | Mirrored | OK |
@@ -106,5 +109,6 @@ validés ne font pas partie de ce dépôt.
 
 ## Licence
 
-`MSXGr-WinUSB` est distribué sous [licence MIT](LICENSE). blueMSX+ est un projet
-distinct sous GPLv2 ; ses modifications ne sont pas incluses dans ce dépôt.
+`MSXGr-WinUSB` est distribué sous [licence MIT](LICENSE).
+[blueMSX+](https://github.com/Hesoten/blueMSX-plus) est un projet distinct sous
+GPLv2 ; ses modifications ne sont pas incluses dans ce dépôt.

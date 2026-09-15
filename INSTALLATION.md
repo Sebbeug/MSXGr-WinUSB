@@ -18,7 +18,8 @@ plus nécessaire après cette première association à WinUSB.
 Fermez l'émulateur et sauvegardez son éventuelle ancienne `MSXGr.dll`. Copiez
 ensuite la nouvelle DLL **à côté du fichier `.exe` de l'émulateur**.
 
-Exemple pour un blueMSX+ x64 portable :
+Exemple pour un [blueMSX+](https://github.com/Hesoten/blueMSX-plus) x64
+portable :
 
 ```text
 C:\Emulateurs\blueMSX+\blueMSX+.exe
