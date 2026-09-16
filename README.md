@@ -46,8 +46,8 @@ emulator executable**. Do not copy it to `System32`.
 | Rastan Saga | 256 KiB | ASCII8 | Working |
 | Break In (1987) | 64 KiB | Mirrored | Working |
 | Ghost (2017) | 32 KiB | Linear | Working |
-| Super Mario World — Noramos (2021) | 2 MiB | Konami SCC | Working, user-tested |
-| Aleste 2 — custom cartridge version | 2 MiB | ASCII16 | Working, user-tested |
+| Super Mario World — Noramos (2021) | 2 MiB | Konami SCC | Working |
+| Aleste 2 — custom cartridge version | 2 MiB | ASCII16 | Working |
 
 These results apply to the cartridges tested with the v1.0.0.7 setup. They do
 not establish general compatibility with modern flash, EEPROM or FPGA
