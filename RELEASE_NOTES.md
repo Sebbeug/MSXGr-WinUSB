@@ -1,28 +1,29 @@
 # MSXGr-WinUSB v1.0.0.7
 
-Première publication de la DLL x64 WinUSB pour l'ASCII/Sunrise MSX Game
-Reader sous Windows 10/11.
+First x64 WinUSB DLL release for the ASCII/Sunrise MSX Game Reader on
+Windows 10/11. This release supports `VID 1125 / PID AC01`.
 
-## Contenu
+## Features
 
-- ABI historique `MSXGr.dll` ;
-- accès direct via SetupAPI/WinUSB ;
-- détection du numéro de lecteur choisi avec les DIP 1–3 ;
-- cache MegaROM par pages de 8 Kio ;
-- écritures mémoire et I/O toujours transmises au Game Reader ;
-- aucune dépendance à Python, libusb ou Zadig après l'installation de WinUSB.
+- Original `MSXGr.dll` ABI;
+- direct access through SetupAPI and WinUSB;
+- detection of the reader's logical ID selected by DIP switches 1–3;
+- MegaROM cache with 8 KiB pages;
+- memory and I/O writes always forwarded to the Game Reader;
+- no Python, libusb or Zadig dependency after WinUSB setup.
 
-Cartouches validées : The Goonies, Gradius/Nemesis, Nemesis 2, Space Manbow,
-R-Type, Rastan Saga, Break In et Ghost. Les détails de taille et de mapper sont
-présents dans le README.
+Tested cartridges: The Goonies, Gradius/Nemesis, Nemesis 2, Space Manbow,
+R-Type, Rastan Saga, Break In, Ghost, Super Mario World (Noramos, 2021) and a
+custom 2 MiB ASCII16 version of Aleste 2. See the README for sizes and mappers.
+SCC audio requires the modified blueMSX+ Game Reader integration.
 
-## DLL x64 validée
+## Validated x64 DLL
 
 ```text
-Nom     : MSXGr.dll
-Taille  : 61952 octets
+Name    : MSXGr.dll
+Size    : 61952 bytes
 SHA-256 : DD23AFDE25ACD004EF895A6F216C23EF6F67E5B8ACA549C5B5BCEE636444204F
 ```
 
-Cette DLL doit être placée à côté de l'exécutable x64. Elle ne peut pas être
-chargée par un programme 32 bits.
+Place this DLL next to the x64 application executable. A 32-bit application
+cannot load it.
