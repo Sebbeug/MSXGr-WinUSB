@@ -39,6 +39,10 @@ foreach ($target in @(
       -o (Join-Path $out 'MSXGr.dll') -lsetupapi -lwinusb
     if ($LASTEXITCODE) { exit $LASTEXITCODE }
     & $clang -std=c11 -O2 -Wall -Wextra -Werror `
+      (Join-Path $PSScriptRoot 'tests\test_cache.c') `
+      -o (Join-Path $out 'test_cache.exe') -lsetupapi -lwinusb
+    if ($LASTEXITCODE) { exit $LASTEXITCODE }
+    & $clang -std=c11 -O2 -Wall -Wextra -Werror `
       (Join-Path $PSScriptRoot 'tests\test_gradius.c') `
       -o (Join-Path $out 'test_gradius.exe')
     if ($LASTEXITCODE) { exit $LASTEXITCODE }

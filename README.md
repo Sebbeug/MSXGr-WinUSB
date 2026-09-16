@@ -11,11 +11,14 @@ Keep the filename `MSXGr.dll`: compatible emulators load the library by this nam
 
 ## Downloads
 
-- [x64 package with documentation](https://github.com/Sebbeug/MSXGr-WinUSB/releases/download/v1.0.0.7/MSXGr-WinUSB-v1.0.0.7-x64.zip)
-- [x64 DLL only](https://github.com/Sebbeug/MSXGr-WinUSB/releases/download/v1.0.0.7/MSXGr.dll)
-- [v1.0.0.7 release page](https://github.com/Sebbeug/MSXGr-WinUSB/releases/tag/v1.0.0.7)
+- [v1.0.0.8 x64 package with documentation](https://github.com/Sebbeug/MSXGr-WinUSB/releases/download/v1.0.0.8/MSXGr-WinUSB-v1.0.0.8-x64.zip)
+- [v1.0.0.8 x64 DLL only](https://github.com/Sebbeug/MSXGr-WinUSB/releases/download/v1.0.0.8/MSXGr.dll)
+- [v1.0.0.8 prerelease notes](https://github.com/Sebbeug/MSXGr-WinUSB/releases/tag/v1.0.0.8)
 
-Check the DLL's SHA-256 below before installing it.
+**v1.0.0.8 is a prerelease; its cache is disabled by default.** Select a mapper
+profile as described in [INSTALLATION.md](INSTALLATION.md) for emulator use.
+The hardware-validated [v1.0.0.7 release](https://github.com/Sebbeug/MSXGr-WinUSB/releases/tag/v1.0.0.7)
+remains available. Each release includes the DLL's SHA-256.
 
 ## Who needs the x64 version?
 
@@ -64,10 +67,14 @@ The library preserves the original `__cdecl` ABI:
 - `MSXGR_SetDebugMode`, `MSXGR_IsSlotEnable`, `MSXGR_GetSlotStatus`;
 - `MSXGR_ReadMemory`, `MSXGR_WriteMemory`, `MSXGR_ReadIO`, `MSXGR_WriteIO`.
 
+v1.0.0.8 adds `MSXGR_ReadMemoryDirect` (physical reads without prefetch) and
+`MSXGR_SetCacheProfile` (explicit mapper profile). See [src/msxgr.h](src/msxgr.h).
+
 It uses SetupAPI and WinUSB, opens one reader at the logical ID selected by
-DIP switches 1–3, and includes a MegaROM cache with 8 KiB pages. Memory and I/O
-writes are always forwarded to the hardware. The published version supports
-PID AC01; simultaneous access to multiple readers is not supported.
+DIP switches 1–3, and offers an optional MegaROM cache with 8 KiB pages.
+Memory and I/O writes are always forwarded to the hardware. v1.0.0.8 accepts
+PID AC01 and AC02; AC02 has only been tested in simulation. Simultaneous
+access to multiple readers is not supported.
 
 ## Building
 
@@ -85,6 +92,9 @@ Output files:
 
 - `build/x64/MSXGr.dll`;
 - `build/x86/MSXGr.dll`.
+
+Run `.\test-cache.ps1` for the x86/x64 regression tests; they simulate USB and
+do not access physical hardware.
 
 The hardware test requires an **original 128 KiB Gradius/Nemesis cartridge**.
 Close the emulator before running it:

@@ -11,3 +11,5 @@ EXPORTS
     MSXGR_WriteMemory
     MSXGR_ReadIO
     MSXGR_WriteIO
+    MSXGR_ReadMemoryDirect
+    MSXGR_SetCacheProfile

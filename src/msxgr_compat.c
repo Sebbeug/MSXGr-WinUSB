@@ -20,7 +20,8 @@ static const GUID GUID_DEVINTERFACE_MSX_GAME_READER =
 #define MSXGR_EP_OUT 0x02
 #define MSXGR_TIMEOUT_MS 5000UL
 #define MSXGR_CHUNK_SIZE 0x4000
-#define MSXGR_VERSION 0x01000007
+#define MSXGR_VERSION 0x01000008
+#include "msxgr.h"
 #define MSXGR_CACHE_PAGE_SIZE 0x2000
 #define MSXGR_CACHE_ENTRY_COUNT 256
 
@@ -35,12 +36,16 @@ typedef struct MemoryCacheEntry {
 static SRWLOCK g_lock = SRWLOCK_INIT;
 static HANDLE g_device = INVALID_HANDLE_VALUE;
 static WINUSB_INTERFACE_HANDLE g_usb = NULL;
-static int g_debug = 0;
-static int g_last_error = 0;
-static char g_error_text[256] = "No error";
+static volatile LONG g_debug = 0;
+static _Thread_local int g_last_error = 0;
+static _Thread_local char g_error_text[256] = "No error";
 static MemoryCacheEntry g_memory_cache[MSXGR_CACHE_ENTRY_COUNT];
-static unsigned char g_mapper_value[0x10000];
-static unsigned char g_mapper_value_valid[0x10000 / 8];
+static unsigned char g_banks[4], g_known;
+static int g_profile = MSXGR_CACHE_NONE;
+static int g_profile_initialized;
+static ULONGLONG g_status_time;
+static int refresh_status_locked(void);
+static void close_reader_locked(void);
 static uint64_t g_mapper_state = 0;
 static uint64_t g_cache_clock = 0;
 static unsigned char g_last_status[3];
@@ -48,7 +53,7 @@ static int g_last_status_valid = 0;
 
 static void trace_message(const char* message)
 {
-    if (g_debug) {
+    if (InterlockedCompareExchange(&g_debug, 0, 0)) {
         OutputDebugStringA("[MSXGrCompat] ");
         OutputDebugStringA(message);
         OutputDebugStringA("\n");
@@ -75,66 +80,72 @@ static int fail_text(const char* text)
     return g_last_error;
 }
 
-static void clear_error(void)
-{
-    g_last_error = 0;
-    strcpy(g_error_text, "No error");
-}
-
-static uint64_t mapper_token(unsigned short address, unsigned char value)
-{
-    uint64_t token = ((uint64_t)address << 8) | value;
-    token += UINT64_C(0x9e3779b97f4a7c15);
-    token = (token ^ (token >> 30)) * UINT64_C(0xbf58476d1ce4e5b9);
-    token = (token ^ (token >> 27)) * UINT64_C(0x94d049bb133111eb);
-    return token ^ (token >> 31);
-}
-
 static void reset_memory_cache_locked(void)
 {
     memset(g_memory_cache, 0, sizeof(g_memory_cache));
-    memset(g_mapper_value, 0, sizeof(g_mapper_value));
-    memset(g_mapper_value_valid, 0, sizeof(g_mapper_value_valid));
+    memset(g_banks, 0, sizeof(g_banks));
+    g_known = 0;
     g_mapper_state = 0;
     g_cache_clock = 0;
 }
 
-static int is_scc_address(unsigned short address)
+static int initialize_profile_locked(void)
 {
-    return (address >= 0x9800 && address <= 0x98ff) ||
-           (address >= 0xb800 && address <= 0xb8ff);
+    static const char* names[] = {"none", "linear", "konami", "konamiscc", "ascii8", "ascii16"};
+    char name[32];
+    DWORD n;
+    if (g_profile_initialized) return 0;
+    n = GetEnvironmentVariableA("MSXGR_MAPPER", name, sizeof(name));
+    g_profile = MSXGR_CACHE_NONE;
+    if (n) {
+        int i;
+        if (n >= sizeof(name)) return fail_text("Invalid MSXGR_MAPPER profile");
+        for (i = 0; i < 6; ++i) if (_stricmp(name, names[i]) == 0) break;
+        if (i == 6) return fail_text("Invalid MSXGR_MAPPER profile");
+        g_profile = i;
+    }
+    g_profile_initialized = 1;
+    return 0;
 }
 
-static int is_direct_memory_address(unsigned short address)
-{
-    return is_scc_address(address);
-}
-
-static int is_non_mapper_write(unsigned short address)
-{
-    return is_scc_address(address) || address == 0xbffe;
-}
-
+/* Profiles describe plain ROM mappers only. SRAM, flash and SCC+ use NONE. */
 static void record_memory_write_locked(int address,
                                        const unsigned char* buffer, int length)
 {
-    int i;
-    for (i = 0; i < length; ++i) {
-        unsigned short current = (unsigned short)(address + i);
-        unsigned int byte_index = current >> 3;
-        unsigned char bit = (unsigned char)(1u << (current & 7));
-        if (is_non_mapper_write(current)) {
-            continue;
+    for (int i = 0; i < length; ++i) {
+        int a = address + i, reg = -1;
+        if (g_profile == MSXGR_CACHE_KONAMI && a >= 0x6000 && a < 0xc000)
+            reg = (a - 0x4000) / 0x2000;
+        if (g_profile == MSXGR_CACHE_KONAMISCC) {
+            if (a >= 0x5000 && a < 0xb800 && (a & 0x1800) == 0x1000)
+                reg = (a - 0x5000) / 0x2000;
+            if (a >= 0x9800 && a < 0xa000 && (g_known & 4) && (g_banks[2] & 63) == 63)
+                continue;
         }
-        if (g_mapper_value_valid[byte_index] & bit) {
-            g_mapper_state ^= mapper_token(current, g_mapper_value[current]);
-        }
-        else {
-            g_mapper_value_valid[byte_index] |= bit;
-        }
-        g_mapper_value[current] = buffer[i];
-        g_mapper_state ^= mapper_token(current, buffer[i]);
+        if (g_profile == MSXGR_CACHE_ASCII8 && a >= 0x6000 && a < 0x8000)
+            reg = (a - 0x6000) / 0x800;
+        if (g_profile == MSXGR_CACHE_ASCII16 && a >= 0x6000 && a < 0x7800 && !(a & 0x800))
+            reg = (a - 0x6000) / 0x1000;
+        if (reg < 0) { reset_memory_cache_locked(); continue; }
+        g_banks[reg] = buffer[i];
+        g_known |= (unsigned char)(1u << reg);
+        g_mapper_state = (uint64_t)g_known << 32;
+        for (int j = 0; j < 4; ++j) g_mapper_state |= (uint64_t)g_banks[j] << (j * 8);
     }
+}
+
+static int transport_error_locked(const char* operation)
+{
+    int result = fail_with_win32(operation);
+    close_reader_locked();
+    return result;
+}
+
+static int short_transfer_locked(void)
+{
+    int result = fail_text("WinUSB returned an invalid transfer length");
+    close_reader_locked();
+    return result;
 }
 
 static MemoryCacheEntry* find_memory_cache_locked(unsigned short page)
@@ -184,13 +195,12 @@ static void close_reader_locked(void)
 static int open_reader_locked(void)
 {
     HDEVINFO devices;
+    int discovery_error = 0;
     SP_DEVICE_INTERFACE_DATA interface_data;
     DWORD index;
 
-    if (g_usb != NULL) {
-        return 0;
-    }
-    clear_error();
+    if (g_usb != NULL) return refresh_status_locked();
+    if (initialize_profile_locked()) return g_last_error;
 
     devices = SetupDiGetClassDevsW(&GUID_DEVINTERFACE_MSX_GAME_READER, NULL, NULL,
                                    DIGCF_PRESENT | DIGCF_DEVICEINTERFACE);
@@ -229,15 +239,15 @@ static int open_reader_locked(void)
         }
 
         file = CreateFileW(detail->DevicePath, GENERIC_READ | GENERIC_WRITE,
-                           FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING,
+                           0, NULL, OPEN_EXISTING,
                            FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OVERLAPPED, NULL);
         free(detail);
         if (file == INVALID_HANDLE_VALUE) {
-            fail_with_win32("CreateFile");
+            discovery_error = fail_with_win32("CreateFile");
             continue;
         }
         if (!WinUsb_Initialize(file, &usb)) {
-            fail_with_win32("WinUsb_Initialize");
+            discovery_error = fail_with_win32("WinUsb_Initialize");
             CloseHandle(file);
             continue;
         }
@@ -245,7 +255,8 @@ static int open_reader_locked(void)
         if (!WinUsb_GetDescriptor(usb, USB_DEVICE_DESCRIPTOR_TYPE, 0, 0,
                                   (PUCHAR)&descriptor, sizeof(descriptor), &transferred) ||
             transferred != sizeof(descriptor) ||
-            descriptor.idVendor != MSXGR_VID || descriptor.idProduct != MSXGR_PID) {
+            descriptor.idVendor != MSXGR_VID ||
+            (descriptor.idProduct != MSXGR_PID && descriptor.idProduct != 0xAC02)) {
             WinUsb_Free(usb);
             CloseHandle(file);
             continue;
@@ -255,27 +266,27 @@ static int open_reader_locked(void)
         g_usb = usb;
         {
             ULONG timeout = MSXGR_TIMEOUT_MS;
-            BOOL auto_clear = TRUE;
-            WinUsb_SetPipePolicy(g_usb, MSXGR_EP_IN, PIPE_TRANSFER_TIMEOUT,
-                                 sizeof(timeout), &timeout);
-            WinUsb_SetPipePolicy(g_usb, MSXGR_EP_OUT, PIPE_TRANSFER_TIMEOUT,
-                                 sizeof(timeout), &timeout);
-            WinUsb_SetPipePolicy(g_usb, MSXGR_EP_IN, AUTO_CLEAR_STALL,
-                                 sizeof(auto_clear), &auto_clear);
-            WinUsb_SetPipePolicy(g_usb, MSXGR_EP_OUT, AUTO_CLEAR_STALL,
-                                 sizeof(auto_clear), &auto_clear);
+            UCHAR auto_clear = TRUE;
+            if (!WinUsb_SetPipePolicy(g_usb, MSXGR_EP_IN, PIPE_TRANSFER_TIMEOUT,
+                                      sizeof(timeout), &timeout) ||
+                !WinUsb_SetPipePolicy(g_usb, MSXGR_EP_OUT, PIPE_TRANSFER_TIMEOUT,
+                                      sizeof(timeout), &timeout) ||
+                !WinUsb_SetPipePolicy(g_usb, MSXGR_EP_IN, AUTO_CLEAR_STALL,
+                                      sizeof(auto_clear), &auto_clear)) {
+                discovery_error = transport_error_locked("WinUsb_SetPipePolicy");
+                continue;
+            }
         }
         SetupDiDestroyDeviceInfoList(devices);
         reset_memory_cache_locked();
         g_last_status_valid = 0;
-        clear_error();
-        trace_message("Game Reader 1125:AC01 opened");
-        return 0;
+        trace_message("Game Reader opened");
+        return refresh_status_locked();
     }
 
     SetupDiDestroyDeviceInfoList(devices);
-    if (g_last_error != 0) return g_last_error;
-    return fail_text("MSX Game Reader 1125:AC01 not found or busy");
+    if (discovery_error != 0) return discovery_error;
+    return fail_text("MSX Game Reader 1125:AC01/AC02 not found or busy (WinUSB interface GUID required)");
 }
 
 static int send_command_locked(UCHAR command, USHORT value, USHORT index)
@@ -293,7 +304,7 @@ static int send_command_locked(UCHAR command, USHORT value, USHORT index)
     packet.Index = index;
     packet.Length = 0;
     if (!WinUsb_ControlTransfer(g_usb, packet, NULL, 0, &transferred, NULL)) {
-        return fail_with_win32("WinUsb_ControlTransfer");
+        return transport_error_locked("WinUsb_ControlTransfer");
     }
     return 0;
 }
@@ -305,10 +316,10 @@ static int read_pipe_locked(unsigned char* buffer, ULONG length)
         ULONG transferred = 0;
         if (!WinUsb_ReadPipe(g_usb, MSXGR_EP_IN, buffer + offset,
                              length - offset, &transferred, NULL)) {
-            return fail_with_win32("WinUsb_ReadPipe");
+            return transport_error_locked("WinUsb_ReadPipe");
         }
-        if (transferred == 0) {
-            return fail_text("WinUSB returned a zero-length read");
+        if (transferred == 0 || transferred > length - offset) {
+            return short_transfer_locked();
         }
         offset += transferred;
     }
@@ -322,10 +333,10 @@ static int write_pipe_locked(const unsigned char* buffer, ULONG length)
         ULONG transferred = 0;
         if (!WinUsb_WritePipe(g_usb, MSXGR_EP_OUT, (PUCHAR)(buffer + offset),
                               length - offset, &transferred, NULL)) {
-            return fail_with_win32("WinUsb_WritePipe");
+            return transport_error_locked("WinUsb_WritePipe");
         }
-        if (transferred == 0) {
-            return fail_text("WinUSB returned a zero-length write");
+        if (transferred == 0 || transferred > length - offset) {
+            return short_transfer_locked();
         }
         offset += transferred;
     }
@@ -345,20 +356,21 @@ static int refresh_status_locked(void)
             memcpy(g_last_status, raw, sizeof(raw));
             g_last_status_valid = 1;
         }
-        clear_error();
+        g_status_time = GetTickCount64();
     }
     return result;
 }
 
 static int is_active_slot_locked(int slot)
 {
-    if (g_usb == NULL || slot < 0 || slot >= 16) {
-        return 0;
+    if (slot < 0 || slot >= 16) { fail_text("Invalid Game Reader slot"); return 0; }
+    if (g_usb == NULL && open_reader_locked()) return 0;
+    if ((!g_last_status_valid || GetTickCount64() - g_status_time >= 250) &&
+        refresh_status_locked()) return 0;
+    if (!g_last_status[0] || g_last_status[2] != (unsigned char)slot) {
+        fail_text("Game Reader disabled or assigned to another logical slot"); return 0;
     }
-    if (!g_last_status_valid && refresh_status_locked() != 0) {
-        return 0;
-    }
-    return g_last_status[0] != 0 && g_last_status[2] == (unsigned char)slot;
+    return 1;
 }
 
 static int read_device_locked(UCHAR command, unsigned char* buffer,
@@ -386,7 +398,6 @@ static int read_device_locked(UCHAR command, unsigned char* buffer,
         output += chunk;
         remaining -= chunk;
     }
-    clear_error();
     return 0;
 }
 
@@ -415,68 +426,71 @@ static int write_device_locked(UCHAR command, const unsigned char* buffer,
         input += chunk;
         remaining -= chunk;
     }
-    clear_error();
     return 0;
 }
 
 static int read_memory_cached_locked(unsigned char* buffer, int address, int length)
 {
-    int remaining = length;
-    int current = address;
-    unsigned char* output = buffer;
-
     if (buffer == NULL || address < 0 || address > 0xffff || length < 0 ||
-        length > 0x10000 || address + length > 0x10000) {
+        length > 0x10000 || address + length > 0x10000)
         return fail_text("Invalid read parameters");
-    }
-
-    while (remaining > 0) {
-        unsigned short page = (unsigned short)(current / MSXGR_CACHE_PAGE_SIZE);
-        int page_address = page * MSXGR_CACHE_PAGE_SIZE;
-        int page_offset = current - page_address;
-        int available = MSXGR_CACHE_PAGE_SIZE - page_offset;
-        int copy_length = remaining < available ? remaining : available;
-        MemoryCacheEntry* entry;
-
-        if (is_direct_memory_address((unsigned short)current)) {
-            int direct_length = 1;
-            if (is_scc_address((unsigned short)current)) {
-                int scc_end = (current & 0xff00) + 0x100;
-                direct_length = remaining < scc_end - current ?
-                                remaining : scc_end - current;
+    if (g_profile == MSXGR_CACHE_NONE) return read_device_locked(2, buffer, address, length);
+    while (length > 0) {
+        int start = address & ~0x1fff, end = start + 0x2000;
+        int direct = address < 0x4000 || address >= 0xc000;
+        if (g_profile == MSXGR_CACHE_KONAMISCC && (start == 0x8000 || start == 0xa000)) {
+            int boundary = start + 0x1800;
+            if (address >= boundary) direct = 1;
+            else end = boundary;
+        }
+        int count = length < end - address ? length : end - address;
+        if (direct) {
+            int result = read_device_locked(2, buffer, address, count);
+            if (result) return result;
+        } else {
+            unsigned short page = (unsigned short)(start / MSXGR_CACHE_PAGE_SIZE);
+            MemoryCacheEntry* entry = find_memory_cache_locked(page);
+            if (!entry) {
+                entry = allocate_memory_cache_locked();
+                entry->valid = 0;
+                int result = read_device_locked(2, entry->data, start, end - start);
+                if (result) return result;
+                entry->mapper_state = g_mapper_state;
+                entry->page = page;
+                entry->last_use = ++g_cache_clock;
+                entry->valid = 1;
             }
-            int result = read_device_locked(2, output, current, direct_length);
-            if (result != 0) return result;
-            current += direct_length;
-            output += direct_length;
-            remaining -= direct_length;
-            continue;
+            memcpy(buffer, entry->data + address - start, (size_t)count);
         }
-
-        entry = find_memory_cache_locked(page);
-        if (entry == NULL) {
-            int result;
-            entry = allocate_memory_cache_locked();
-            entry->valid = 0;
-            result = read_device_locked(2, entry->data, page_address,
-                                        MSXGR_CACHE_PAGE_SIZE);
-            if (result != 0) return result;
-            entry->mapper_state = g_mapper_state;
-            entry->page = page;
-            entry->last_use = ++g_cache_clock;
-            entry->valid = 1;
-        }
-
-        memcpy(output, entry->data + page_offset, (size_t)copy_length);
-        current += copy_length;
-        output += copy_length;
-        remaining -= copy_length;
+        address += count; buffer += count; length -= count;
     }
-    clear_error();
     return 0;
 }
 
-__declspec(dllexport) int __cdecl MSXGR_Init(void)
+int __cdecl MSXGR_SetCacheProfile(int profile)
+{
+    if (profile < MSXGR_CACHE_NONE || profile > MSXGR_CACHE_ASCII16)
+        return fail_text("Invalid cache profile");
+    AcquireSRWLockExclusive(&g_lock);
+    reset_memory_cache_locked();
+    g_profile = profile;
+    g_profile_initialized = 1;
+    ReleaseSRWLockExclusive(&g_lock);
+    return 0;
+}
+
+int __cdecl MSXGR_ReadMemoryDirect(int slot, char* buffer, int address, int length)
+{
+    int result;
+    AcquireSRWLockExclusive(&g_lock);
+    reset_memory_cache_locked();
+    result = is_active_slot_locked(slot) ?
+        read_device_locked(2, (unsigned char*)buffer, address, length) : g_last_error;
+    ReleaseSRWLockExclusive(&g_lock);
+    return result;
+}
+
+int __cdecl MSXGR_Init(void)
 {
     int result;
     AcquireSRWLockExclusive(&g_lock);
@@ -485,31 +499,36 @@ __declspec(dllexport) int __cdecl MSXGR_Init(void)
     return result;
 }
 
-__declspec(dllexport) void __cdecl MSXGR_Uninit(void)
+void __cdecl MSXGR_Uninit(void)
 {
     AcquireSRWLockExclusive(&g_lock);
     close_reader_locked();
-    clear_error();
+    g_profile_initialized = 0;
     ReleaseSRWLockExclusive(&g_lock);
 }
 
-__declspec(dllexport) char* __cdecl MSXGR_Err2Str(int error)
+char* __cdecl MSXGR_Err2Str(int error)
 {
-    (void)error;
-    return g_error_text;
+    static _Thread_local char text[256];
+    if (!error) return "No error";
+    if (error == g_last_error) return g_error_text;
+    if (!FormatMessageA(FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS,
+                        NULL, (DWORD)error, 0, text, sizeof(text), NULL))
+        snprintf(text, sizeof(text), "Error %d", error);
+    return text;
 }
 
-__declspec(dllexport) int __cdecl MSXGR_GetVersion(void)
+int __cdecl MSXGR_GetVersion(void)
 {
     return MSXGR_VERSION;
 }
 
-__declspec(dllexport) void __cdecl MSXGR_SetDebugMode(int level)
+void __cdecl MSXGR_SetDebugMode(int level)
 {
-    g_debug = level != 0;
+    InterlockedExchange(&g_debug, level != 0);
 }
 
-__declspec(dllexport) int __cdecl MSXGR_IsSlotEnable(int slot)
+int __cdecl MSXGR_IsSlotEnable(int slot)
 {
     int enabled;
     AcquireSRWLockExclusive(&g_lock);
@@ -518,7 +537,7 @@ __declspec(dllexport) int __cdecl MSXGR_IsSlotEnable(int slot)
     return enabled;
 }
 
-__declspec(dllexport) int __cdecl MSXGR_GetSlotStatus(int slot, int* status)
+int __cdecl MSXGR_GetSlotStatus(int slot, int* status)
 {
     unsigned char raw[3];
     int result;
@@ -526,7 +545,7 @@ __declspec(dllexport) int __cdecl MSXGR_GetSlotStatus(int slot, int* status)
         return fail_text("Invalid Game Reader slot or status buffer");
     }
     AcquireSRWLockExclusive(&g_lock);
-    result = refresh_status_locked();
+    result = g_usb == NULL ? open_reader_locked() : refresh_status_locked();
     if (result == 0) {
         memcpy(raw, g_last_status, sizeof(raw));
         if (raw[2] != (unsigned char)slot) {
@@ -536,33 +555,32 @@ __declspec(dllexport) int __cdecl MSXGR_GetSlotStatus(int slot, int* status)
             status[0] = raw[0];
             status[1] = raw[1];
             status[2] = raw[2];
-            clear_error();
         }
     }
     ReleaseSRWLockExclusive(&g_lock);
     return result;
 }
 
-__declspec(dllexport) int __cdecl MSXGR_ReadMemory(int slot, char* buffer,
+int __cdecl MSXGR_ReadMemory(int slot, char* buffer,
                                                    int address, int length)
 {
     int result;
     AcquireSRWLockExclusive(&g_lock);
     result = is_active_slot_locked(slot) ?
              read_memory_cached_locked((unsigned char*)buffer, address, length) :
-             fail_text("Invalid Game Reader slot");
+             g_last_error;
     ReleaseSRWLockExclusive(&g_lock);
     return result;
 }
 
-__declspec(dllexport) int __cdecl MSXGR_WriteMemory(int slot, char* buffer,
+int __cdecl MSXGR_WriteMemory(int slot, char* buffer,
                                                     int address, int length)
 {
     int result;
     AcquireSRWLockExclusive(&g_lock);
     result = is_active_slot_locked(slot) ?
              write_device_locked(3, (const unsigned char*)buffer, address, length) :
-             fail_text("Invalid Game Reader slot");
+             g_last_error;
     if (result == 0) {
         record_memory_write_locked(address, (const unsigned char*)buffer, length);
     }
@@ -570,26 +588,27 @@ __declspec(dllexport) int __cdecl MSXGR_WriteMemory(int slot, char* buffer,
     return result;
 }
 
-__declspec(dllexport) int __cdecl MSXGR_ReadIO(int slot, char* buffer,
+int __cdecl MSXGR_ReadIO(int slot, char* buffer,
                                                int address, int length)
 {
     int result;
     AcquireSRWLockExclusive(&g_lock);
     result = is_active_slot_locked(slot) ?
              read_device_locked(4, (unsigned char*)buffer, address, length) :
-             fail_text("Invalid Game Reader slot");
+             g_last_error;
     ReleaseSRWLockExclusive(&g_lock);
     return result;
 }
 
-__declspec(dllexport) int __cdecl MSXGR_WriteIO(int slot, char* buffer,
+int __cdecl MSXGR_WriteIO(int slot, char* buffer,
                                                 int address, int length)
 {
     int result;
     AcquireSRWLockExclusive(&g_lock);
+    reset_memory_cache_locked();
     result = is_active_slot_locked(slot) ?
              write_device_locked(5, (const unsigned char*)buffer, address, length) :
-             fail_text("Invalid Game Reader slot");
+             g_last_error;
     ReleaseSRWLockExclusive(&g_lock);
     return result;
 }
