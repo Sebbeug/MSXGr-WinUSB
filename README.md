@@ -17,8 +17,8 @@ Keep the filename `MSXGr.dll`: compatible emulators load the library by this nam
 
 **v1.0.0.8 is a prerelease; its cache is disabled by default.** Select a mapper
 profile as described in [INSTALLATION.md](INSTALLATION.md) for emulator use.
-The hardware-validated [v1.0.0.7 release](https://github.com/Sebbeug/MSXGr-WinUSB/releases/tag/v1.0.0.7)
-remains available. Each release includes the DLL's SHA-256.
+Full in-game validation of v1.0.0.8 remains pending; see the release notes for
+the current validation status.
 
 ## Who needs the x64 version?
 
@@ -49,9 +49,10 @@ emulator executable**. Do not copy it to `System32`.
 | Super Mario World — Noramos (2021) | 2 MiB | Konami SCC | Working |
 | Aleste 2 — custom cartridge version | 2 MiB | ASCII16 | Working |
 
-These results apply to the cartridges tested with the v1.0.0.7 setup. They do
-not establish general compatibility with modern flash, EEPROM or FPGA
-cartridges, or cartridges with custom protection.
+These results come from earlier hardware-validation sessions and do not
+establish general compatibility with modern flash, EEPROM or FPGA cartridges,
+or cartridges with custom protection. Full in-game validation of v1.0.0.8
+remains pending.
 
 The DLL handles memory and I/O transfers; the emulator must use the cartridge's
 actual mapper. For example, The Goonies requires **Konami**, despite its 32 KiB
@@ -107,12 +108,13 @@ The test checks the 128 KiB dump against the reference CRC32 `4dfcc009`.
 A fresh build is not considered validated until both this test and an
 in-emulator game test pass.
 
-## Validated x64 release
+## v1.0.0.8 download verification
 
-SHA-256 of the v1.0.0.7 x64 `MSXGr.dll`:
+SHA-256 checksums of the published v1.0.0.8 x64 files:
 
 ```text
-DD23AFDE25ACD004EF895A6F216C23EF6F67E5B8ACA549C5B5BCEE636444204F
+MSXGr.dll                         246C041FB708906280872C7F854600E7FC4BBB1A2F2EF386C95FFACB20776CE5
+MSXGr-WinUSB-v1.0.0.8-x64.zip    36AAB806B38AD219C3D9B2E5223FBC438CC12CFAAFB32D36374742DD7DE7C9CD
 ```
 
 Commercial ROMs, portable emulator builds, logs, dumps and unvalidated
